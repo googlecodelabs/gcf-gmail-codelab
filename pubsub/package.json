@@ -1,0 +1,17 @@
+{
+  "name": "gcf-gmail-codelab-pubsub",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "repository": {
+    "type": "git",
+    "url": ""
+  },
+  "author": "",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "@google-cloud/datastore": "^3.1.2",
+    "@google-cloud/storage": "^2.4.2",
+    "googleapis": "^37.2.0"
+  }
+}

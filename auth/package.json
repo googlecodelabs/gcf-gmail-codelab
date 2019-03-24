@@ -1,0 +1,17 @@
+{
+  "name": "gcf-gmail-codelab-auth",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "repository": {
+    "type": "git",
+    "url": ""
+  },
+  "author": "",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "@google-cloud/express-oauth2-handlers": "^0.1.0",
+    "express": "^4.16.4",
+    "googleapis": "^37.2.0"
+  }
+}
