@@ -10,7 +10,7 @@
   "author": "",
   "license": "Apache-2.0",
   "dependencies": {
-    "@google-cloud/express-oauth2-handlers": "^0.1.0",
+    "@google-cloud/express-oauth2-handlers": "^0.1.2",
     "express": "^4.16.4",
     "googleapis": "^37.2.0"
   }
