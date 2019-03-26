@@ -37,7 +37,7 @@ const setUpGmailPushNotifications = (email, pubsubTopic) => {
 // If the authorization process completes successfully, set up Gmail push
 // notification using the tokens returned
 const onSuccess = async (req, res) => {
-  var email;
+  let email;
 
   try {
     // Set up the googleapis library to use the returned tokens.

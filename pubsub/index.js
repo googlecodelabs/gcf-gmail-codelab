@@ -8,6 +8,7 @@ const visionClient = new vision.ImageAnnotatorClient();
 
 const TAG = process.env.TAG;
 const SHEET = process.env.GOOGLE_SHEET_ID;
+const SHEET_RANGE = 'Sheet1!A1:F1';
 
 const requiredScopes = [
   'profile',
@@ -47,9 +48,9 @@ const getMostRecentMessageWithTag = async (email, historyId) => {
 // from the message.
 const extractInfoFromMessage = (message) => {
   const messageId = message.data.id;
-  var from;
-  var filename;
-  var attachmentId;
+  let from;
+  let filename;
+  let attachmentId;
 
   const headers = message.data.payload.headers;
   for (var i in headers) {
@@ -93,11 +94,7 @@ const analyzeAttachment = async (data, filename) => {
       }
     });
     const labels = analysis.labelAnnotations;
-    for (var i = 0; i <= 2; i++) {
-      if (labels[i] && labels[i].description) {
-        topLabels[i] = labels[i].description;
-      }
-    }
+    topLabels = labels.map(x => x.description).slice(0, 3);
   }
 
   return topLabels;
@@ -107,10 +104,10 @@ const analyzeAttachment = async (data, filename) => {
 const updateReferenceSheet = async (from, filename, topLabels) => {
   await googleSheets.spreadsheets.values.append({
     spreadsheetId: SHEET,
-    range: 'Sheet1!A1:F1',
+    range: SHEET_RANGE,
     valueInputOption: 'USER_ENTERED',
     requestBody: {
-      range: 'Sheet1!A1:F1',
+      range: SHEET_RANGE,
       majorDimension: 'ROWS',
       values: [
         [from, filename].concat(topLabels)
