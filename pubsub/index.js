@@ -1,35 +1,41 @@
-const clientSecrets = require('./client_secret.json');
-const {Datastore} = require('@google-cloud/datastore');
+const Auth = require('@google-cloud/express-oauth2-handlers');
 const {google} = require('googleapis');
 const gmail = google.gmail('v1');
-const {Storage} = require('@google-cloud/storage');
 const googleSheets = google.sheets('v4');
+const vision = require('@google-cloud/vision');
 
-const datastoreClient = new Datastore();
-const storageClient = new Storage();
+const visionClient = new vision.ImageAnnotatorClient();
 
 const TAG = process.env.TAG;
-const BUCKET = process.env.CLOUD_SaTORAGE_BUCKET;
 const SHEET = process.env.GOOGLE_SHEET_ID;
+
+const requiredScopes = [
+  'profile',
+  'email',
+  'https://www.googleapis.com/auth/gmail.modify',
+  'https://www.googleapis.com/auth/spreadsheets'
+];
+
+const auth = Auth('datastore', requiredScopes, 'email', true);
 
 const getMostRecentMessageWithTag = async (email, historyId) => {
   // Look up the most recent message using the history ID in the push
   // notification. The API call returns a message ID.
-  var listMessagesRes = await gmail.users.history.list({
+  const listMessagesRes = await gmail.users.history.list({
     userId: email,
     maxResults: 1,
     startHistoryId: historyId
   });
-  var messageId = listMessagesRes.data.history[0].messages[0].id;
+  const messageId = listMessagesRes.data.history[0].messages[0].id;
 
   // Get the message using the message ID.
-  var message = await gmail.users.messages.get({
+  const message = await gmail.users.messages.get({
     userId: email,
     id: messageId
   });
 
   // Proceed only when the message has the keyword [SUBMISSION] in the subject.
-  var headers = message.data.payload.headers;
+  const headers = message.data.payload.headers;
   for (var x in headers) {
     if (headers[x].name === 'Subject' && headers[x].value.indexOf(TAG) > -1) {
       return message;
@@ -40,19 +46,19 @@ const getMostRecentMessageWithTag = async (email, historyId) => {
 // Extract message ID, sender, attachment filename and attachment ID
 // from the message.
 const extractInfoFromMessage = (message) => {
-  var messageId = message.data.id;
+  const messageId = message.data.id;
   var from;
   var filename;
   var attachmentId;
 
-  var headers = message.data.payload.headers;
+  const headers = message.data.payload.headers;
   for (var i in headers) {
     if (headers[i].name === 'From') {
       from = headers[i].value;
     }
   }
 
-  var payloadParts = message.data.payload.parts;
+  const payloadParts = message.data.payload.parts;
   for (var j in payloadParts) {
     if (payloadParts[j].body.attachmentId) {
       filename = payloadParts[j].filename;
@@ -68,35 +74,46 @@ const extractInfoFromMessage = (message) => {
   };
 };
 
-// Get attachment of a message..
+// Get attachment of a message.
 const extractAttachmentFromMessage = async (email, messageId, attachmentId) => {
-  await gmail.users.messages.attachments.get({
+  return gmail.users.messages.attachments.get({
     id: attachmentId,
     messageId: messageId,
     userId: email
   });
 };
 
-// Upload attachment of a message to Cloud Storage.
-const uploadAttachment = async (data, filename) => {
-  let file = storageClient.bucket(BUCKET).file(filename);
-  let writeableStream = file.createWriteStream({resumable: false});
-  writeableStream.write(data);
-  writeableStream.end();
+// Tag the attachment using Cloud Vision API
+const analyzeAttachment = async (data, filename) => {
+  var topLabels = ['', '', ''];
+  if (filename.endsWith('.png') || filename.endsWith('.jpg')) {
+    const [analysis] = await visionClient.labelDetection({
+      image: {
+        content: Buffer.from(data, 'base64')
+      }
+    });
+    const labels = analysis.labelAnnotations;
+    for (var i = 0; i <= 2; i++) {
+      if (labels[i] && labels[i].description) {
+        topLabels[i] = labels[i].description;
+      }
+    }
+  }
+
+  return topLabels;
 };
 
 // Write sender, attachment filename, and download link to a Google Sheet.
-const updateReferenceSheet = async (from, filename) => {
-  let link = `https://storage.cloud.google.com/${BUCKET}/${filename}`;
+const updateReferenceSheet = async (from, filename, topLabels) => {
   await googleSheets.spreadsheets.values.append({
     spreadsheetId: SHEET,
-    range: 'Sheet1!A1:D1',
+    range: 'Sheet1!A1:F1',
     valueInputOption: 'USER_ENTERED',
     requestBody: {
-      range: 'Sheet1!A1:D1',
+      range: 'Sheet1!A1:F1',
       majorDimension: 'ROWS',
       values: [
-        [from, filename, link]
+        [from, filename].concat(topLabels)
       ]
     }
   });
@@ -106,26 +123,25 @@ exports.watchGmailMessages = async (event) => {
   // Decode the incoming Gmail push notification.
   const data = Buffer.from(event.data, 'base64').toString();
   const newMessageNotification = JSON.parse(data);
-  var email = newMessageNotification.emailAddress;
-  var historyId = newMessageNotification.historyId;
+  const email = newMessageNotification.emailAddress;
+  const historyId = newMessageNotification.historyId;
+  console.log(historyId);
 
-  // Connect to Gmail API and Google Sheets API using the access tokens
-  // from the authorization process.
-  var credentialKey = datastoreClient.key(['oauth2token', `${email}`]);
-  var [credentials] = await datastoreClient.get(credentialKey);
-  var token = credentials.token;
-
-  var OAuth2Client = new google.auth.OAuth2(clientSecrets.GOOGLE_CLIENT_ID,
-    clientSecrets.GOOGLE_CLIENT_SECRET, clientSecrets.GOOGLE_CALLBACK_URL);
-  OAuth2Client.setCredentials(token);
-  google.options({auth: OAuth2Client});
+  try {
+    await auth.auth.requireAuth(null, null, email);
+  } catch (err) {
+    console.log('An error has occurred in the auth process.');
+    throw err;
+  }
+  const authClient = await auth.auth.authedUser.getClient();
+  google.options({auth: authClient});
 
   // Process the incoming message.
-  var message = await getMostRecentMessageWithTag(email, historyId);
-  var messageInfo = extractInfoFromMessage(message);
+  const message = await getMostRecentMessageWithTag(email, historyId);
+  const messageInfo = extractInfoFromMessage(message);
   if (messageInfo) {
-    var attachment = await extractAttachmentFromMessage(email, messageInfo.messageId, messageInfo.attachmentId);
-    await uploadAttachment(attachment.data.data, `${messageInfo.messageId}_${messageInfo.attachmentFilename}`);
-    await updateReferenceSheet(messageInfo.from, messageInfo.attachmentFilename);
+    const attachment = await extractAttachmentFromMessage(email, messageInfo.messageId, messageInfo.attachmentId);
+    const topLabels = await analyzeAttachment(attachment.data.data, messageInfo.attachmentFilename);
+    await updateReferenceSheet(messageInfo.from, messageInfo.attachmentFilename, topLabels);
   }
 };
