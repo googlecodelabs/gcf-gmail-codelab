@@ -6,7 +6,6 @@ const vision = require('@google-cloud/vision');
 
 const visionClient = new vision.ImageAnnotatorClient();
 
-const TAG = process.env.TAG;
 const SHEET = process.env.GOOGLE_SHEET_ID;
 const SHEET_RANGE = 'Sheet1!A1:F1';
 
@@ -20,14 +19,12 @@ const requiredScopes = [
 const auth = Auth('datastore', requiredScopes, 'email', true);
 
 const getMostRecentMessageWithTag = async (email, historyId) => {
-  // Look up the most recent message using the history ID in the push
-  // notification. The API call returns a message ID.
-  const listMessagesRes = await gmail.users.history.list({
+  // Look up the most recent message.
+  const listMessagesRes = await gmail.users.messages.list({
     userId: email,
-    maxResults: 1,
-    startHistoryId: historyId
+    maxResults: 1
   });
-  const messageId = listMessagesRes.data.history[0].messages[0].id;
+  const messageId = listMessagesRes.data.messages[0].id;
 
   // Get the message using the message ID.
   const message = await gmail.users.messages.get({
@@ -35,13 +32,7 @@ const getMostRecentMessageWithTag = async (email, historyId) => {
     id: messageId
   });
 
-  // Proceed only when the message has the keyword [SUBMISSION] in the subject.
-  const headers = message.data.payload.headers;
-  for (var x in headers) {
-    if (headers[x].name === 'Subject' && headers[x].value.indexOf(TAG) > -1) {
-      return message;
-    }
-  }
+  return message;
 };
 
 // Extract message ID, sender, attachment filename and attachment ID
@@ -122,7 +113,6 @@ exports.watchGmailMessages = async (event) => {
   const newMessageNotification = JSON.parse(data);
   const email = newMessageNotification.emailAddress;
   const historyId = newMessageNotification.historyId;
-  console.log(historyId);
 
   try {
     await auth.auth.requireAuth(null, null, email);
@@ -136,7 +126,7 @@ exports.watchGmailMessages = async (event) => {
   // Process the incoming message.
   const message = await getMostRecentMessageWithTag(email, historyId);
   const messageInfo = extractInfoFromMessage(message);
-  if (messageInfo) {
+  if (messageInfo.attachmentId && messageInfo.attachmentFilename) {
     const attachment = await extractAttachmentFromMessage(email, messageInfo.messageId, messageInfo.attachmentId);
     const topLabels = await analyzeAttachment(attachment.data.data, messageInfo.attachmentFilename);
     await updateReferenceSheet(messageInfo.from, messageInfo.attachmentFilename, topLabels);
