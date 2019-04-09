@@ -10,6 +10,7 @@
   "author": "Google Cloud",
   "license": "Apache-2.0",
   "dependencies": {
+    "@google-cloud/datastore": "^3.1.2",
     "@google-cloud/express-oauth2-handlers": "^0.1.2",
     "@google-cloud/vision": "^0.25.0",
     "express": "^4.16.4",

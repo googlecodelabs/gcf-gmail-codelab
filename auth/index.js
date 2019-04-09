@@ -53,7 +53,9 @@ const onSuccess = async (req, res) => {
     await setUpGmailPushNotifications(email, PUBSUB_TOPIC);
   } catch (err) {
     console.log(err);
-    throw err;
+    if (!err.toString().includes('one user push notification client allowed per developer')) {
+      throw err;
+    }
   }
 
   res.send(`Successfully set up Gmail push notifications.`);

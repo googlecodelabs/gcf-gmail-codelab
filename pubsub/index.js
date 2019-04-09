@@ -1,9 +1,11 @@
 const Auth = require('@google-cloud/express-oauth2-handlers');
+const {Datastore} = require('@google-cloud/datastore');
 const {google} = require('googleapis');
 const gmail = google.gmail('v1');
 const googleSheets = google.sheets('v4');
 const vision = require('@google-cloud/vision');
 
+const datastoreClient = new Datastore();
 const visionClient = new vision.ImageAnnotatorClient();
 
 const SHEET = process.env.GOOGLE_SHEET_ID;
@@ -18,21 +20,40 @@ const requiredScopes = [
 
 const auth = Auth('datastore', requiredScopes, 'email', true);
 
+const checkForDuplicateNotifications = async (messageId) => {
+  const transaction = datastoreClient.transaction();
+  await transaction.run();
+  const messageKey = datastoreClient.key(['emailNotifications', messageId]);
+  const [message] = await transaction.get(messageKey);
+  if (!message) {
+    await transaction.save({
+      key: messageKey,
+      data: {}
+    });
+  }
+  await transaction.commit();
+  if (!message) {
+    return messageId;
+  }
+};
+
 const getMostRecentMessageWithTag = async (email, historyId) => {
   // Look up the most recent message.
   const listMessagesRes = await gmail.users.messages.list({
     userId: email,
     maxResults: 1
   });
-  const messageId = listMessagesRes.data.messages[0].id;
+  const messageId = await checkForDuplicateNotifications(listMessagesRes.data.messages[0].id);
 
   // Get the message using the message ID.
-  const message = await gmail.users.messages.get({
-    userId: email,
-    id: messageId
-  });
+  if (messageId) {
+    const message = await gmail.users.messages.get({
+      userId: email,
+      id: messageId
+    });
 
-  return message;
+    return message;
+  }
 };
 
 // Extract message ID, sender, attachment filename and attachment ID
@@ -125,10 +146,12 @@ exports.watchGmailMessages = async (event) => {
 
   // Process the incoming message.
   const message = await getMostRecentMessageWithTag(email, historyId);
-  const messageInfo = extractInfoFromMessage(message);
-  if (messageInfo.attachmentId && messageInfo.attachmentFilename) {
-    const attachment = await extractAttachmentFromMessage(email, messageInfo.messageId, messageInfo.attachmentId);
-    const topLabels = await analyzeAttachment(attachment.data.data, messageInfo.attachmentFilename);
-    await updateReferenceSheet(messageInfo.from, messageInfo.attachmentFilename, topLabels);
+  if (message) {
+    const messageInfo = extractInfoFromMessage(message);
+    if (messageInfo.attachmentId && messageInfo.attachmentFilename) {
+      const attachment = await extractAttachmentFromMessage(email, messageInfo.messageId, messageInfo.attachmentId);
+      const topLabels = await analyzeAttachment(attachment.data.data, messageInfo.attachmentFilename);
+      await updateReferenceSheet(messageInfo.from, messageInfo.attachmentFilename, topLabels);
+    }
   }
 };
